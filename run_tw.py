@@ -24,13 +24,12 @@ THREADS_TOKEN = os.getenv("THREADS_TOKEN", "").strip()
 def pre_check():
     """
     檢查今日是否開盤。
-    如果是 GitHub Actions 手動觸發，則強制執行。
+    如果是 GitHub Actions 手動觸發 (workflow_dispatch)，則強制執行。
     """
-    # 檢查是否為手動觸發 (GitHub 會傳入此環境變數)
     is_manual = os.getenv("GITHUB_EVENT_NAME") == "workflow_dispatch"
     
     if is_manual:
-        print("⚡ 手動強制執行模式：跳過開休市檢查。")
+        print("⚡ 手動強制執行模式：跳過開休市檢查，直接抓取資料。")
         return True
         
     if not is_market_open("TW"):
@@ -46,7 +45,7 @@ def calc_pivot(df):
     return round(2*p - h, 1), round(2*p - l, 1)
 
 def get_tw_300():
-    """從證交所網址抓取台股前 300 檔清單"""
+    """直接從證交所抓取台股前 300 檔清單"""
     try:
         url = "https://isin.twse.com.tw/isin/C_public.jsp?strMode=2"
         res = requests.get(url, timeout=10)
@@ -91,7 +90,7 @@ def post_to_threads(content):
         if publish_res.status_code == 200:
             print("🎉 Threads AI 5日預測報告發布成功！")
         else:
-            print(f"❌ Threads 發布失敗: {publish_res.text}")
+            print(f"❌ 發布失敗: {publish_res.text}")
     except Exception as e:
         print(f"💥 Threads 功能異常: {e}")
 
@@ -102,7 +101,7 @@ def run():
     fixed = ["2330.TW", "2317.TW", "2454.TW", "0050.TW"]
     watch = list(dict.fromkeys(fixed + get_tw_300()))
 
-    print(f"🚀 啟動 AI 5日預測分析，監控標的數: {len(watch)}...")
+    print(f"🚀 啟動 AI 5日預測分析 (監控 {len(watch)} 檔)...")
     data = yf.download(watch, period="2y", auto_adjust=True, group_by="ticker", progress=False)
 
     feats = ["mom20", "bias", "vol_ratio"]
@@ -113,6 +112,7 @@ def run():
             df = data[s].dropna()
             if len(df) < 150: continue
 
+            # 核心：預測未來 5 日回報
             df["mom20"] = df["Close"].pct_change(20)
             df["bias"] = (df["Close"] - df["Close"].rolling(20).mean()) / df["Close"].rolling(20).mean()
             df["vol_ratio"] = df["Volume"] / df["Volume"].rolling(20).mean()
@@ -133,6 +133,7 @@ def run():
         except:
             continue
 
+    # --- 建立報告內容 ---
     today_str = datetime.now().strftime("%Y-%m-%d")
     msg = f"📊 AI 台股預測報告 ({today_str})\n"
     msg += "🎯 目標：預測未來 5 個交易日漲幅\n"
@@ -146,12 +147,14 @@ def run():
         r = results[s]
         msg += f"• {s}: 預估 {r['pred']:+.2%} (現價:{r['price']})\n"
 
-    msg += "\n📈 本系統每日自動海選台股前 300 檔，數據完全透明。"
-    msg += "\n\n🔗 歡迎進群交流 AI 選股心得：\n[這裡貼上你的連結]"
+    msg += "\n📈 本系統每日自動海選，數據完全透明。"
+    msg += "\n\n🔗 加入 Discord 交流 AI 選股：\nhttps://discord.gg/aGzhSd2A5d"
     msg += "\n#台股 #AI選股 #XGBoost #5日預測"
 
+    # 執行發布
     post_to_threads(msg)
 
+    # 儲存紀錄
     hist = [{
         "date": today_str,
         "symbol": s,
@@ -162,9 +165,8 @@ def run():
 
     if hist:
         pd.DataFrame(hist).to_csv(HISTORY_FILE, mode="a", header=not os.path.exists(HISTORY_FILE), index=False)
-        print(f"✅ 歷史數據已備份。")
+        print(f"✅ 歷史數據已存檔。")
 
 if __name__ == "__main__":
-    # 這裡會判斷是否要攔截假日
     if pre_check():
         run()
