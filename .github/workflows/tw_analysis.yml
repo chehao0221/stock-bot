@@ -1,39 +1,55 @@
 name: TW Post-Market AI (Threads Auto Post)
+
 on:
   schedule:
-    - cron: '30 7 * * 1-5' # 台北時間 15:30
-  workflow_dispatch: 
+    - cron: '30 7 * * 1-5' # 國際標準時間 07:30 = 台北時間 15:30 (週一至週五)
+  workflow_dispatch: # 保留手動執行按鈕，這對測試非常有用
 
 jobs:
   run:
     runs-on: ubuntu-latest
     permissions:
-      contents: write
+      contents: write # 確保 Actions 有權限把 csv 檔案推回倉庫
+    
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+        with:
+          # 這裡加入 token 確保後續 push 權限
+          token: ${{ secrets.GITHUB_TOKEN }}
       
-      - uses: actions/setup-python@v5
+      - name: Set up Python
+        uses: actions/setup-python@v5
         with:
           python-version: '3.10'
           cache: 'pip'
 
       - name: Install dependencies
-        run: pip install -r requirements.txt
+        run: |
+          # 如果沒有 requirements.txt，可以手動安裝 requests
+          if [ -f requirements.txt ]; then
+            pip install -r requirements.txt
+          else
+            pip install requests
+          fi
 
-      - name: Analyze Market
+      - name: Analyze Market and Post to Threads
         env:
-          # 這裡必須對接 Secrets
+          # 對接你在 Settings 設定的長效 Token
           THREADS_TOKEN: ${{ secrets.THREADS_TOKEN }}
         run: python run_tw.py
 
       - name: Commit and Save History
         run: |
-          git config --global user.name "AI-Bot"
-          git config --global user.email "actions@github.com"
-          git add tw_history.csv || true
-          if git diff --staged --quiet; then
-            echo "No changes"
-          else
-            git commit -m "Update stock history [skip ci]"
-            git push
+          git config --global user.name "github-actions[bot]"
+          git config --global user.email "github-actions[bot]@users.noreply.github.com"
+          # 只有當檔案存在且有變動時才 commit
+          if [ -f tw_history.csv ]; then
+            git add tw_history.csv
+            if git diff --staged --quiet; then
+              echo "No changes to history file."
+            else
+              git commit -m "📈 Update stock history: $(date +'%Y-%m-%d')"
+              git push
+            fi
           fi
