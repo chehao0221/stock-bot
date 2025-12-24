@@ -32,13 +32,16 @@ def get_tw_300():
 
 def post_to_threads(text):
     if not THREADS_TOKEN:
-        print("❌ 錯誤：找不到 THREADS_TOKEN")
+        print("❌ 錯誤：找不到 THREADS_TOKEN，請檢查 GitHub Secrets")
         return
     try:
+        # 1. 建立容器
         res = requests.post(
             "https://graph.threads.net/v1.0/me/threads",
             data={"media_type": "TEXT", "text": text, "access_token": THREADS_TOKEN}
         ).json()
+        
+        # 2. 正式發布
         if "id" in res:
             requests.post(
                 "https://graph.threads.net/v1.0/me/threads_publish",
@@ -48,7 +51,7 @@ def post_to_threads(text):
         else:
             print(f"❌ 建立容器失敗: {res}")
     except Exception as e:
-        print(f"❌ Threads 錯誤: {e}")
+        print(f"❌ Threads API 錯誤: {e}")
 
 def run_prediction():
     symbols = get_tw_300()
@@ -73,10 +76,11 @@ def run_prediction():
             results[s] = {"pred": pred_val, "price": df["Close"].iloc[-1], "sup": sup}
         except: continue
 
-    # 建立貼文內容
-    msg = f"📊 台股 AI 預測報告 ({datetime.now():%Y-%m-%d})\n"
+    # --- 建立報告內容 ---
+    report_date = datetime.now().strftime("%Y-%m-%d")
+    msg = f"📊 台股 AI 預測報告 ({report_date})\n"
     msg += "----------------------------------\n\n"
-    
+
     horses = {k: v for k, v in results.items() if k not in fixed and v["pred"] > 0}
     top_5 = sorted(horses, key=lambda x: horses[x]["pred"], reverse=True)[:5]
 
@@ -85,12 +89,18 @@ def run_prediction():
         r = results[s]
         msg += f" {s}: 預估 {r['pred']:+.2%}\n └ 現價: {r['price']:.1f} (支撐: {r['sup']})\n"
 
-    # --- 加入介紹與連結 ---
+    msg += "\n🔍 權值標竿監控\n"
+    for s in fixed:
+        if s in results:
+            r = results[s]
+            msg += f"🔹 {s}: {r['pred']:+.2%}\n"
+
+    # --- 加入 Discord 介紹與連結 ---
     msg += "\n---\n"
     msg += "🚀 想要看更完整的勝率對帳與更多標的嗎？\n"
     msg += "歡迎加入我們的 Discord 社群，與 AI 交易者一同交流！\n"
     msg += "🔗 https://discord.gg/aGzhSd2A5d\n\n"
-    msg += "#台股 #AI選股 #ThreadsAPI"
+    msg += "#台股 #AI選股 #機器學習 #ThreadsAPI"
 
     post_to_threads(msg)
 
