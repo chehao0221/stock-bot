@@ -29,7 +29,7 @@ def pre_check():
     is_manual = os.getenv("GITHUB_EVENT_NAME") == "workflow_dispatch"
     
     if is_manual:
-        print("⚡ 手動強制執行模式：跳過開休市檢查，直接抓取資料。")
+        print("⚡ 手動強制執行模式：跳過開休市檢查，直接抓取最近交易日資料。")
         return True
         
     if not is_market_open("TW"):
@@ -45,7 +45,7 @@ def calc_pivot(df):
     return round(2*p - h, 1), round(2*p - l, 1)
 
 def get_tw_300():
-    """直接從證交所抓取台股前 300 檔清單"""
+    """直接從證交所抓取台股清單 (Mode 2 為上市)"""
     try:
         url = "https://isin.twse.com.tw/isin/C_public.jsp?strMode=2"
         res = requests.get(url, timeout=10)
@@ -56,7 +56,7 @@ def get_tw_300():
         codes = codes[codes.str.len() == 4].head(300)
         return [f"{c}.TW" for c in codes]
     except Exception as e:
-        print(f"⚠️ 抓取網址失敗: {e}，改用預設權值股")
+        print(f"⚠️ 抓取網址失敗: {e}，改用預設權值股。")
         return ["2330.TW", "2317.TW", "2454.TW", "2308.TW", "2382.TW"]
 
 # =========================
@@ -74,7 +74,7 @@ def post_to_threads(content):
 
         payload = {
             "media_type": "TEXT",
-            "text": content[:495],
+            "text": content[:495], # 確保不超過 Threads 限制
             "access_token": THREADS_TOKEN
         }
         container_res = requests.post(f"{base_url}/{user_id}/threads", data=payload)
@@ -101,7 +101,7 @@ def run():
     fixed = ["2330.TW", "2317.TW", "2454.TW", "0050.TW"]
     watch = list(dict.fromkeys(fixed + get_tw_300()))
 
-    print(f"🚀 啟動 AI 5日預測分析 (監控 {len(watch)} 檔)...")
+    print(f"🚀 啟動 AI 5日預測分析 (監控 {len(watch)} 檔台股)...")
     data = yf.download(watch, period="2y", auto_adjust=True, group_by="ticker", progress=False)
 
     feats = ["mom20", "bias", "vol_ratio"]
@@ -112,11 +112,11 @@ def run():
             df = data[s].dropna()
             if len(df) < 150: continue
 
-            # 核心：預測未來 5 日回報
+            # --- AI 核心邏輯：預測未來 5 個交易日 ---
             df["mom20"] = df["Close"].pct_change(20)
             df["bias"] = (df["Close"] - df["Close"].rolling(20).mean()) / df["Close"].rolling(20).mean()
             df["vol_ratio"] = df["Volume"] / df["Volume"].rolling(20).mean()
-            df["target"] = df["Close"].shift(-5) / df["Close"] - 1
+            df["target"] = df["Close"].shift(-5) / df["Close"] - 1 # 5日回報率
 
             train = df.iloc[:-5].dropna()
             model = XGBRegressor(n_estimators=100, max_depth=3, learning_rate=0.05, random_state=42)
@@ -148,13 +148,15 @@ def run():
         msg += f"• {s}: 預估 {r['pred']:+.2%} (現價:{r['price']})\n"
 
     msg += "\n📈 本系統每日自動海選，數據完全透明。"
-    msg += "\n\n🔗 加入 Discord 交流 AI 選股：\nhttps://discord.gg/aGzhSd2A5d"
-    msg += "\n#台股 #AI選股 #XGBoost #5日預測"
+    msg += f"\n\n🔗 加入 Discord 交流 AI 選股：\nhttps://discord.gg/aGzhSd2A5d"
+    
+    # 豐富標籤增加曝光
+    msg += "\n\n#AI #台股 #選股機器人 #機器學習 #量化投資 #5日預測 #XGBoost #股市分析"
 
-    # 執行發布
+    # --- 執行發布 ---
     post_to_threads(msg)
 
-    # 儲存紀錄
+    # --- 儲存歷史紀錄至 CSV ---
     hist = [{
         "date": today_str,
         "symbol": s,
@@ -165,7 +167,7 @@ def run():
 
     if hist:
         pd.DataFrame(hist).to_csv(HISTORY_FILE, mode="a", header=not os.path.exists(HISTORY_FILE), index=False)
-        print(f"✅ 歷史數據已存檔。")
+        print(f"✅ 預測紀錄已成功儲存。")
 
 if __name__ == "__main__":
     if pre_check():
