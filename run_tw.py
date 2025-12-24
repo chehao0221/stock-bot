@@ -14,10 +14,15 @@ warnings.filterwarnings("ignore")
 THREADS_TOKEN = os.getenv("THREADS_TOKEN", "").strip()
 
 def calc_pivot(df):
-    r = df.iloc[-20:]
-    h, l, c = r["High"].max(), r["Low"].min(), r["Close"].iloc[-1]
-    p = (h + l + c) / 3
-    return round(2*p - h, 1), round(2*p - l, 1)
+    try:
+        r = df.iloc[-20:]
+        h = float(r["High"].max())
+        l = float(r["Low"].min())
+        c = float(df["Close"].iloc[-1])
+        p = (h + l + c) / 3
+        return round(2*p - h, 1), round(2*p - l, 1)
+    except:
+        return 0.0, 0.0
 
 def get_tw_300():
     try:
@@ -32,26 +37,24 @@ def get_tw_300():
 
 def post_to_threads(text):
     if not THREADS_TOKEN:
-        print("❌ 錯誤：找不到 THREADS_TOKEN，請檢查 GitHub Secrets")
+        print("❌ 錯誤：找不到 THREADS_TOKEN")
         return
     try:
-        # 1. 建立貼文容器
         res = requests.post(
             "https://graph.threads.net/v1.0/me/threads",
             data={"media_type": "TEXT", "text": text, "access_token": THREADS_TOKEN}
         ).json()
         
-        # 2. 正式發布
         if "id" in res:
             requests.post(
                 "https://graph.threads.net/v1.0/me/threads_publish",
                 data={"creation_id": res["id"], "access_token": THREADS_TOKEN}
             )
-            print("✅ 成功發布至 Threads 並包含邀請連結！")
+            print("✅ 成功發布至 Threads！")
         else:
-            print(f"❌ 建立容器失敗: {res}")
+            print(f"❌ 建立貼文失敗: {res}")
     except Exception as e:
-        print(f"❌ Threads API 錯誤: {e}")
+        print(f"❌ API 錯誤: {e}")
 
 def run_prediction():
     symbols = get_tw_300()
@@ -63,6 +66,10 @@ def run_prediction():
         try:
             df = yf.download(s, period="1y", interval="1d", progress=False)
             if len(df) < 50: continue
+            
+            # 強制轉換為數值，避免 Series 錯誤
+            df["Close"] = pd.to_numeric(df["Close"], errors='coerce')
+            df["Volume"] = pd.to_numeric(df["Volume"], errors='coerce')
             
             df["Ret"] = df["Close"].pct_change()
             df["Vol_Change"] = df["Volume"].pct_change()
@@ -77,12 +84,16 @@ def run_prediction():
             model = XGBRegressor(n_estimators=50, learning_rate=0.1)
             model.fit(X, y)
             
-            last_features = [[df["Ret"].iloc[-1], df["Vol_Change"].iloc[-1]]]
-            pred_val = model.predict(last_features)[0]
+            last_ret = float(df["Ret"].iloc[-1])
+            last_vol = float(df["Vol_Change"].iloc[-1])
+            pred_val = float(model.predict([[last_ret, last_vol]])[0])
             
-            sup, res_p = calc_pivot(df)
-            results[s] = {"pred": pred_val, "price": df["Close"].iloc[-1], "sup": sup}
-        except: continue
+            price_val = float(df["Close"].iloc[-1])
+            sup, _ = calc_pivot(df)
+            
+            results[s] = {"pred": pred_val, "price": price_val, "sup": sup}
+        except Exception as e:
+            continue
 
     # --- 建立報告內容 ---
     report_date = datetime.now().strftime("%Y-%m-%d")
@@ -95,7 +106,7 @@ def run_prediction():
     msg += "🏆 AI 海選潛力股\n"
     for s in top_5:
         r = results[s]
-        msg += f" {s}: 預估 {r['pred']:+.2%}\n └ 現價: {r['price']:.1f} (支撐: {r['sup']})\n"
+        msg += f" {s}: 預估 {r['pred']:+.2%}\n └ 現價: {r['price']:.1f} (支撐: {r['sup']:.1f})\n"
 
     msg += "\n🔍 權值標竿監控\n"
     for s in fixed:
@@ -103,7 +114,6 @@ def run_prediction():
             r = results[s]
             msg += f"🔹 {s}: {r['pred']:+.2%}\n"
 
-    # --- 加入 Discord 介紹與連結 ---
     msg += "\n---\n"
     msg += "🚀 想要看更完整的勝率對帳與更多標的嗎？\n"
     msg += "歡迎加入我們的 Discord 社群，與 AI 交易者一同交流！\n"
