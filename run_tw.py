@@ -12,8 +12,6 @@ warnings.filterwarnings("ignore")
 # 基本設定
 # =========================
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-HISTORY_FILE = os.path.join(BASE_DIR, "tw_history.csv")
-# 從 GitHub Secrets 讀取權杖
 THREADS_TOKEN = os.getenv("THREADS_TOKEN", "").strip()
 
 # =========================
@@ -41,7 +39,7 @@ def get_tw_300():
 # =========================
 def post_to_threads(text):
     if not THREADS_TOKEN:
-        print("⚠️ 找不到 THREADS_TOKEN，跳過發文")
+        print("⚠️ 未偵測到 THREADS_TOKEN，無法發文")
         return
     try:
         # 1. 建立貼文容器
@@ -56,14 +54,14 @@ def post_to_threads(text):
                 "https://graph.threads.net/v1.0/me/threads_publish",
                 data={"creation_id": res["id"], "access_token": THREADS_TOKEN}
             )
-            print("✅ Threads 報告發送成功！")
+            print("✅ 成功發布至 Threads 並包含邀請連結！")
         else:
-            print(f"❌ Threads 容器建立失敗: {res}")
+            print(f"❌ 建立容器失敗: {res}")
     except Exception as e:
-        print(f"❌ Threads 錯誤: {e}")
+        print(f"❌ Threads API 錯誤: {e}")
 
 # =========================
-# 主預測程式
+# 主預測邏輯
 # =========================
 def run_prediction():
     symbols = get_tw_300()
@@ -96,7 +94,7 @@ def run_prediction():
             results[s] = {"pred": pred_val, "price": df["Close"].iloc[-1], "sup": sup, "res": res_p}
         except: continue
 
-    # 建立報告內容
+    # 建立貼文內容
     report_date = datetime.now().strftime("%Y-%m-%d")
     msg = f"📊 台股 AI 預測報告 ({report_date})\n"
     msg += "----------------------------------\n\n"
@@ -115,7 +113,13 @@ def run_prediction():
             r = results[s]
             msg += f"🔹 {s}: {r['pred']:+.2%}\n"
 
-    msg += "\n#台股 #AI選股 #ThreadsAPI"
+    # --- 加入介紹與 Discord 連結 ---
+    msg += "\n---\n"
+    msg += "🚀 想要看更完整的勝率對帳與更多標的嗎？\n"
+    msg += "歡迎加入我們的 Discord 社群，與 AI 交易者一同交流！\n"
+    msg += "🔗 https://discord.gg/aGzhSd2A5d\n\n"
+    msg += "#台股 #AI選股 #機器學習 #ThreadsAPI"
+
     post_to_threads(msg)
 
 if __name__ == "__main__":
