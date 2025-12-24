@@ -1,9 +1,7 @@
-name: TW Post-Market AI (15:30 台北時間執行)
+name: TW Post-Market AI (Threads Auto Post)
 on:
   schedule:
-    # 台北時間 15:30 執行 (UTC 07:30)
-    # 這樣每天下午茶時間你就能收到今日收盤後的最新分析
-    - cron: '30 7 * * 1-5'
+    - cron: '30 7 * * 1-5' # 台北時間 15:30
   workflow_dispatch: 
 
 jobs:
@@ -20,24 +18,22 @@ jobs:
           cache: 'pip'
 
       - name: Install dependencies
-        run: |
-          pip install -r requirements.txt
-          # 確保環境包含 yfinance pandas numpy requests xgboost lxml
+        run: pip install -r requirements.txt
 
       - name: Analyze Market
         env:
-          DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
-        # 確保檔名與您的腳本一致
+          # 將 GitHub Secrets 的 Token 對接到環境變數
+          THREADS_TOKEN: ${{ secrets.THREADS_TOKEN }}
         run: python run_tw.py
 
       - name: Commit and Save History
         run: |
-          git config --global user.name "AI-Auditor"
+          git config --global user.name "AI-Bot"
           git config --global user.email "actions@github.com"
           git add tw_history.csv || true
           if git diff --staged --quiet; then
-            echo "No changes to commit"
+            echo "No changes"
           else
-            git commit -m "Update TW history [skip ci]"
+            git commit -m "Update stock history [skip ci]"
             git push
           fi
