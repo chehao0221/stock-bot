@@ -35,7 +35,7 @@ def post_to_threads(text):
         print("❌ 錯誤：找不到 THREADS_TOKEN，請檢查 GitHub Secrets")
         return
     try:
-        # 1. 建立容器
+        # 1. 建立貼文容器
         res = requests.post(
             "https://graph.threads.net/v1.0/me/threads",
             data={"media_type": "TEXT", "text": text, "access_token": THREADS_TOKEN}
@@ -47,7 +47,7 @@ def post_to_threads(text):
                 "https://graph.threads.net/v1.0/me/threads_publish",
                 data={"creation_id": res["id"], "access_token": THREADS_TOKEN}
             )
-            print("✅ 成功發布至 Threads！")
+            print("✅ 成功發布至 Threads 並包含邀請連結！")
         else:
             print(f"❌ 建立容器失敗: {res}")
     except Exception as e:
@@ -63,15 +63,23 @@ def run_prediction():
         try:
             df = yf.download(s, period="1y", interval="1d", progress=False)
             if len(df) < 50: continue
+            
             df["Ret"] = df["Close"].pct_change()
             df["Vol_Change"] = df["Volume"].pct_change()
             df["Target"] = df["Close"].shift(-5).pct_change(5)
+            
             train = df.dropna()
             if train.empty: continue
-            X, y = train[["Ret", "Vol_Change"]], train["Target"]
+            
+            X = train[["Ret", "Vol_Change"]]
+            y = train["Target"]
+            
             model = XGBRegressor(n_estimators=50, learning_rate=0.1)
             model.fit(X, y)
-            pred_val = model.predict([[df["Ret"].iloc[-1], df["Vol_Change"].iloc[-1]]])[0]
+            
+            last_features = [[df["Ret"].iloc[-1], df["Vol_Change"].iloc[-1]]]
+            pred_val = model.predict(last_features)[0]
+            
             sup, res_p = calc_pivot(df)
             results[s] = {"pred": pred_val, "price": df["Close"].iloc[-1], "sup": sup}
         except: continue
