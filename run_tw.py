@@ -12,6 +12,7 @@ warnings.filterwarnings("ignore")
 # 基本設定
 # =========================
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+# 從 GitHub Secrets 讀取權杖 (需手動在 GitHub 設定)
 THREADS_TOKEN = os.getenv("THREADS_TOKEN", "").strip()
 
 # =========================
@@ -39,7 +40,7 @@ def get_tw_300():
 # =========================
 def post_to_threads(text):
     if not THREADS_TOKEN:
-        print("⚠️ 未偵測到 THREADS_TOKEN，無法發文")
+        print("⚠️ 錯誤：找不到 THREADS_TOKEN，請檢查 GitHub Secrets")
         return
     try:
         # 1. 建立貼文容器
@@ -61,7 +62,7 @@ def post_to_threads(text):
         print(f"❌ Threads API 錯誤: {e}")
 
 # =========================
-# 主預測邏輯
+# 主程式邏輯
 # =========================
 def run_prediction():
     symbols = get_tw_300()
@@ -94,7 +95,7 @@ def run_prediction():
             results[s] = {"pred": pred_val, "price": df["Close"].iloc[-1], "sup": sup, "res": res_p}
         except: continue
 
-    # 建立貼文內容
+    # --- 建立報告內容 ---
     report_date = datetime.now().strftime("%Y-%m-%d")
     msg = f"📊 台股 AI 預測報告 ({report_date})\n"
     msg += "----------------------------------\n\n"
@@ -113,7 +114,7 @@ def run_prediction():
             r = results[s]
             msg += f"🔹 {s}: {r['pred']:+.2%}\n"
 
-    # --- 加入介紹與 Discord 連結 ---
+    # --- 加入 Discord 介紹與連結 ---
     msg += "\n---\n"
     msg += "🚀 想要看更完整的勝率對帳與更多標的嗎？\n"
     msg += "歡迎加入我們的 Discord 社群，與 AI 交易者一同交流！\n"
