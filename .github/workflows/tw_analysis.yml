@@ -22,7 +22,7 @@ jobs:
 
       - name: Analyze Market
         env:
-          # 將 GitHub Secrets 的 Token 對接到環境變數
+          # 這裡必須對接 Secrets
           THREADS_TOKEN: ${{ secrets.THREADS_TOKEN }}
         run: python run_tw.py
 
