@@ -5,6 +5,7 @@ import os
 from xgboost import XGBRegressor
 from datetime import datetime
 import warnings
+import time
 
 warnings.filterwarnings("ignore")
 
@@ -37,24 +38,42 @@ def get_tw_300():
 
 def post_to_threads(text):
     if not THREADS_TOKEN:
-        print("❌ 錯誤：找不到 THREADS_TOKEN")
+        print("❌ 錯誤：環境變數 THREADS_TOKEN 為空，請檢查 GitHub Secrets 設定。")
         return
+    
+    base_url = "https://graph.threads.net/v1.0/me"
+    
     try:
+        # 第一步：建立貼文容器 (Media Container)
+        print("🚀 正在建立 Threads 貼文容器...")
         res = requests.post(
-            "https://graph.threads.net/v1.0/me/threads",
+            f"{base_url}/threads",
             data={"media_type": "TEXT", "text": text, "access_token": THREADS_TOKEN}
         ).json()
         
-        if "id" in res:
-            requests.post(
-                "https://graph.threads.net/v1.0/me/threads_publish",
-                data={"creation_id": res["id"], "access_token": THREADS_TOKEN}
-            )
-            print("✅ 成功發布至 Threads！")
+        if "id" not in res:
+            print(f"❌ 建立容器失敗！API 回傳：{res}")
+            return
+
+        creation_id = res["id"]
+        print(f"✅ 容器建立成功 (ID: {creation_id})，準備正式發布...")
+
+        # 稍微等候 2 秒確保後台處理完成
+        time.sleep(2)
+
+        # 第二步：正式發布貼文 (Publish)
+        pub_res = requests.post(
+            f"{base_url}/threads_publish",
+            data={"creation_id": creation_id, "access_token": THREADS_TOKEN}
+        ).json()
+        
+        if "id" in pub_res:
+            print(f"🎉 貼文發布成功！Threads 貼文 ID: {pub_res['id']}")
         else:
-            print(f"❌ 建立貼文失敗: {res}")
+            print(f"❌ 發布失敗！錯誤詳情：{pub_res}")
+            
     except Exception as e:
-        print(f"❌ API 錯誤: {e}")
+        print(f"❌ 發生未預期錯誤: {e}")
 
 def run_prediction():
     symbols = get_tw_300()
@@ -62,12 +81,13 @@ def run_prediction():
     all_targets = list(set(symbols + fixed))
     
     results = {}
+    print(f"🔍 正在分析 {len(all_targets)} 檔標的...")
+    
     for s in all_targets:
         try:
             df = yf.download(s, period="1y", interval="1d", progress=False)
             if len(df) < 50: continue
             
-            # 強制轉換為數值，避免 Series 錯誤
             df["Close"] = pd.to_numeric(df["Close"], errors='coerce')
             df["Volume"] = pd.to_numeric(df["Volume"], errors='coerce')
             
@@ -92,7 +112,7 @@ def run_prediction():
             sup, _ = calc_pivot(df)
             
             results[s] = {"pred": pred_val, "price": price_val, "sup": sup}
-        except Exception as e:
+        except:
             continue
 
     # --- 建立報告內容 ---
