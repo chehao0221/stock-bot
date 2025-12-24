@@ -6,6 +6,7 @@ from xgboost import XGBRegressor
 from datetime import datetime
 import warnings
 import time
+import sys
 
 warnings.filterwarnings("ignore")
 
@@ -38,42 +39,42 @@ def get_tw_300():
 
 def post_to_threads(text):
     if not THREADS_TOKEN:
-        print("❌ 錯誤：環境變數 THREADS_TOKEN 為空，請檢查 GitHub Secrets 設定。")
-        return
+        print("❌ 錯誤：找不到 THREADS_TOKEN")
+        sys.exit(1)
     
     base_url = "https://graph.threads.net/v1.0/me"
     
     try:
-        # 第一步：建立貼文容器 (Media Container)
-        print("🚀 正在建立 Threads 貼文容器...")
+        # 第一步：建立容器
+        print("🚀 正在建立貼文內容...")
         res = requests.post(
             f"{base_url}/threads",
             data={"media_type": "TEXT", "text": text, "access_token": THREADS_TOKEN}
         ).json()
         
         if "id" not in res:
-            print(f"❌ 建立容器失敗！API 回傳：{res}")
-            return
+            print(f"❌ 建立容器失敗：{res}")
+            sys.exit(1)
 
         creation_id = res["id"]
-        print(f"✅ 容器建立成功 (ID: {creation_id})，準備正式發布...")
+        print(f"✅ 容器建立成功 (ID: {creation_id})，等待 5 秒後正式發布...")
+        time.sleep(5) 
 
-        # 稍微等候 2 秒確保後台處理完成
-        time.sleep(2)
-
-        # 第二步：正式發布貼文 (Publish)
+        # 第二步：正式發布
         pub_res = requests.post(
             f"{base_url}/threads_publish",
             data={"creation_id": creation_id, "access_token": THREADS_TOKEN}
         ).json()
         
         if "id" in pub_res:
-            print(f"🎉 貼文發布成功！Threads 貼文 ID: {pub_res['id']}")
+            print(f"🎉 貼文發布成功！ID: {pub_res['id']}")
         else:
-            print(f"❌ 發布失敗！錯誤詳情：{pub_res}")
+            print(f"❌ 發布失敗（可能因連結被擋或權限不足）：{pub_res}")
+            sys.exit(1)
             
     except Exception as e:
-        print(f"❌ 發生未預期錯誤: {e}")
+        print(f"❌ 執行異常: {e}")
+        sys.exit(1)
 
 def run_prediction():
     symbols = get_tw_300()
@@ -81,8 +82,6 @@ def run_prediction():
     all_targets = list(set(symbols + fixed))
     
     results = {}
-    print(f"🔍 正在分析 {len(all_targets)} 檔標的...")
-    
     for s in all_targets:
         try:
             df = yf.download(s, period="1y", interval="1d", progress=False)
@@ -90,7 +89,6 @@ def run_prediction():
             
             df["Close"] = pd.to_numeric(df["Close"], errors='coerce')
             df["Volume"] = pd.to_numeric(df["Volume"], errors='coerce')
-            
             df["Ret"] = df["Close"].pct_change()
             df["Vol_Change"] = df["Volume"].pct_change()
             df["Target"] = df["Close"].shift(-5).pct_change(5)
@@ -98,24 +96,16 @@ def run_prediction():
             train = df.dropna()
             if train.empty: continue
             
-            X = train[["Ret", "Vol_Change"]]
-            y = train["Target"]
-            
+            X, y = train[["Ret", "Vol_Change"]], train["Target"]
             model = XGBRegressor(n_estimators=50, learning_rate=0.1)
             model.fit(X, y)
             
-            last_ret = float(df["Ret"].iloc[-1])
-            last_vol = float(df["Vol_Change"].iloc[-1])
-            pred_val = float(model.predict([[last_ret, last_vol]])[0])
-            
+            pred_val = float(model.predict([[float(df["Ret"].iloc[-1]), float(df["Vol_Change"].iloc[-1])]])[0])
             price_val = float(df["Close"].iloc[-1])
             sup, _ = calc_pivot(df)
-            
             results[s] = {"pred": pred_val, "price": price_val, "sup": sup}
-        except:
-            continue
+        except: continue
 
-    # --- 建立報告內容 ---
     report_date = datetime.now().strftime("%Y-%m-%d")
     msg = f"📊 台股 AI 預測報告 ({report_date})\n"
     msg += "----------------------------------\n\n"
@@ -134,11 +124,11 @@ def run_prediction():
             r = results[s]
             msg += f"🔹 {s}: {r['pred']:+.2%}\n"
 
+    # --- 測試重點：如果還是發不出去，請嘗試註解掉下面這三行 ---
     msg += "\n---\n"
-    msg += "🚀 想要看更完整的勝率對帳與更多標的嗎？\n"
-    msg += "歡迎加入我們的 Discord 社群，與 AI 交易者一同交流！\n"
+    msg += "🚀 更多分析請見 Discord 社群\n"
     msg += "🔗 https://discord.gg/aGzhSd2A5d\n\n"
-    msg += "#台股 #AI選股 #機器學習 #ThreadsAPI"
+    msg += "#台股 #AI選股"
 
     post_to_threads(msg)
 
