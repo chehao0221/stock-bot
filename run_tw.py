@@ -16,16 +16,25 @@ warnings.filterwarnings("ignore")
 # =========================
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 HISTORY_FILE = os.path.join(BASE_DIR, "tw_history.csv")
-# 讀取 GitHub Secrets 的 Threads Token
 THREADS_TOKEN = os.getenv("THREADS_TOKEN", "").strip()
 
 # =========================
 # 工具函數
 # =========================
 def pre_check():
-    """檢查今日是否開盤"""
+    """
+    檢查今日是否開盤。
+    如果是 GitHub Actions 手動觸發，則強制執行。
+    """
+    # 檢查是否為手動觸發 (GitHub 會傳入此環境變數)
+    is_manual = os.getenv("GITHUB_EVENT_NAME") == "workflow_dispatch"
+    
+    if is_manual:
+        print("⚡ 手動強制執行模式：跳過開休市檢查。")
+        return True
+        
     if not is_market_open("TW"):
-        print("📌 因假日或節日，股市未開盤，停止動作")
+        print("📌 因假日或節日，股市未開盤，停止動作。")
         return False
     return True
 
@@ -37,7 +46,7 @@ def calc_pivot(df):
     return round(2*p - h, 1), round(2*p - l, 1)
 
 def get_tw_300():
-    """抓取台股前 300 檔清單網址"""
+    """從證交所網址抓取台股前 300 檔清單"""
     try:
         url = "https://isin.twse.com.tw/isin/C_public.jsp?strMode=2"
         res = requests.get(url, timeout=10)
@@ -61,29 +70,26 @@ def post_to_threads(content):
 
     base_url = "https://graph.threads.net/v1.0"
     try:
-        # 1. 獲取 User ID
         me_res = requests.get(f"{base_url}/me?fields=id&access_token={THREADS_TOKEN}")
         user_id = me_res.json().get("id")
 
-        # 2. 建立貼文容器 (確保不超過 500 字)
         payload = {
             "media_type": "TEXT",
-            "text": content[:490],
+            "text": content[:495],
             "access_token": THREADS_TOKEN
         }
         container_res = requests.post(f"{base_url}/{user_id}/threads", data=payload)
         creation_id = container_res.json().get("id")
 
-        print(f"⏳ Threads 容器已建立，等待 15 秒進行伺服器同步...")
+        print(f"⏳ Threads 容器已建立，等待 15 秒同步...")
         time.sleep(15)
 
-        # 3. 正式發布
         publish_res = requests.post(
             f"{base_url}/{user_id}/threads_publish",
             data={"creation_id": creation_id, "access_token": THREADS_TOKEN}
         )
         if publish_res.status_code == 200:
-            print("🎉 Threads AI 報告發布成功！")
+            print("🎉 Threads AI 5日預測報告發布成功！")
         else:
             print(f"❌ Threads 發布失敗: {publish_res.text}")
     except Exception as e:
@@ -93,11 +99,10 @@ def post_to_threads(content):
 # 主程式
 # =========================
 def run():
-    # 設定固定監控的權值股
-    fixed = ["2330.TW", "2317.TW", "2454.TW", "0050.TW", "2308.TW", "2382.TW"]
+    fixed = ["2330.TW", "2317.TW", "2454.TW", "0050.TW"]
     watch = list(dict.fromkeys(fixed + get_tw_300()))
 
-    print(f"🚀 開始分析 {len(watch)} 檔台股標的...")
+    print(f"🚀 啟動 AI 5日預測分析，監控標的數: {len(watch)}...")
     data = yf.download(watch, period="2y", auto_adjust=True, group_by="ticker", progress=False)
 
     feats = ["mom20", "bias", "vol_ratio"]
@@ -123,37 +128,30 @@ def run():
             results[s] = {
                 "pred": pred,
                 "price": round(df["Close"].iloc[-1], 2),
-                "sup": sup,
-                "res": res_price
+                "sup": sup
             }
         except:
             continue
 
-    # --- 建立報告內容 ---
     today_str = datetime.now().strftime("%Y-%m-%d")
-    msg = f"📊 AI 台股盤後報告 ({today_str})\n"
+    msg = f"📊 AI 台股預測報告 ({today_str})\n"
+    msg += "🎯 目標：預測未來 5 個交易日漲幅\n"
     msg += "--------------------------\n"
     
     horses = {k: v for k, v in results.items() if k not in fixed and v["pred"] > 0}
     top_5 = sorted(horses, key=lambda x: horses[x]["pred"], reverse=True)[:5]
 
-    msg += "🏆 AI 海選潛力黑馬：\n"
+    msg += "🏆 AI 海選 5日潛力黑馬：\n"
     for s in top_5:
         r = results[s]
-        msg += f"• {s}: 預估 {r['pred']:+.2%}\n  (現價:{r['price']} 支撐:{r['sup']})\n"
+        msg += f"• {s}: 預估 {r['pred']:+.2%} (現價:{r['price']})\n"
 
-    msg += "\n🔍 權值股監控：\n"
-    for s in fixed[:3]: # 為符合字數限制，僅取前三
-        if s in results:
-            r = results[s]
-            msg += f"• {s}: 預估 {r['pred']:+.2%}\n"
+    msg += "\n📈 本系統每日自動海選台股前 300 檔，數據完全透明。"
+    msg += "\n\n🔗 歡迎進群交流 AI 選股心得：\n[這裡貼上你的連結]"
+    msg += "\n#台股 #AI選股 #XGBoost #5日預測"
 
-    msg += "\n💡 AI 模型僅供參考，不構成投資建議。"
-
-    # --- 執行 Threads 發布 ---
     post_to_threads(msg)
 
-    # --- 儲存歷史紀錄至 CSV ---
     hist = [{
         "date": today_str,
         "symbol": s,
@@ -163,10 +161,10 @@ def run():
     } for s in (top_5 + fixed) if s in results]
 
     if hist:
-        new_df = pd.DataFrame(hist)
-        new_df.to_csv(HISTORY_FILE, mode="a", header=not os.path.exists(HISTORY_FILE), index=False)
-        print(f"✅ 歷史數據已存入 {HISTORY_FILE}")
+        pd.DataFrame(hist).to_csv(HISTORY_FILE, mode="a", header=not os.path.exists(HISTORY_FILE), index=False)
+        print(f"✅ 歷史數據已備份。")
 
 if __name__ == "__main__":
+    # 這裡會判斷是否要攔截假日
     if pre_check():
         run()
