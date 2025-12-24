@@ -12,11 +12,12 @@ warnings.filterwarnings("ignore")
 # 基本設定
 # =========================
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+HISTORY_FILE = os.path.join(BASE_DIR, "tw_history.csv")
 # 從 GitHub Secrets 讀取權杖
 THREADS_TOKEN = os.getenv("THREADS_TOKEN", "").strip()
 
 # =========================
-# 工具函數 (計算支撐/壓力與抓取清單)
+# 工具函數
 # =========================
 def calc_pivot(df):
     r = df.iloc[-20:]
@@ -40,29 +41,26 @@ def get_tw_300():
 # =========================
 def post_to_threads(text):
     if not THREADS_TOKEN:
-        print("⚠️ 錯誤：未在 GitHub Secrets 設定 THREADS_TOKEN")
+        print("⚠️ 找不到 THREADS_TOKEN，跳過發文")
         return
-    
     try:
         # 1. 建立貼文容器
-        container_url = "https://graph.threads.net/v1.0/me/threads"
         res = requests.post(
-            container_url,
+            "https://graph.threads.net/v1.0/me/threads",
             data={"media_type": "TEXT", "text": text, "access_token": THREADS_TOKEN}
         ).json()
         
-        # 2. 正式發布貼文
+        # 2. 正式發布
         if "id" in res:
-            publish_url = "https://graph.threads.net/v1.0/me/threads_publish"
             requests.post(
-                publish_url,
+                "https://graph.threads.net/v1.0/me/threads_publish",
                 data={"creation_id": res["id"], "access_token": THREADS_TOKEN}
             )
             print("✅ Threads 報告發送成功！")
         else:
-            print(f"❌ Threads 容器建立失敗：{res}")
+            print(f"❌ Threads 容器建立失敗: {res}")
     except Exception as e:
-        print(f"❌ Threads API 發生異常：{e}")
+        print(f"❌ Threads 錯誤: {e}")
 
 # =========================
 # 主預測程式
@@ -78,7 +76,6 @@ def run_prediction():
             df = yf.download(s, period="1y", interval="1d", progress=False)
             if len(df) < 50: continue
             
-            # 特徵工程
             df["Ret"] = df["Close"].pct_change()
             df["Vol_Change"] = df["Volume"].pct_change()
             df["Target"] = df["Close"].shift(-5).pct_change(5)
@@ -89,7 +86,6 @@ def run_prediction():
             X = train[["Ret", "Vol_Change"]]
             y = train["Target"]
             
-            # XGBoost 模型訓練
             model = XGBRegressor(n_estimators=50, learning_rate=0.1)
             model.fit(X, y)
             
@@ -98,15 +94,13 @@ def run_prediction():
             
             sup, res_p = calc_pivot(df)
             results[s] = {"pred": pred_val, "price": df["Close"].iloc[-1], "sup": sup, "res": res_p}
-        except:
-            continue
+        except: continue
 
-    # 建立報告文字
+    # 建立報告內容
     report_date = datetime.now().strftime("%Y-%m-%d")
-    msg = f"📈 台股 AI 預測報告 ({report_date})\n"
+    msg = f"📊 台股 AI 預測報告 ({report_date})\n"
     msg += "----------------------------------\n\n"
 
-    # 篩選潛力黑馬
     horses = {k: v for k, v in results.items() if k not in fixed and v["pred"] > 0}
     top_5 = sorted(horses, key=lambda x: horses[x]["pred"], reverse=True)[:5]
 
@@ -122,9 +116,6 @@ def run_prediction():
             msg += f"🔹 {s}: {r['pred']:+.2%}\n"
 
     msg += "\n#台股 #AI選股 #ThreadsAPI"
-
-    # 執行 Threads 發文
-    print("正在準備發布至 Threads...")
     post_to_threads(msg)
 
 if __name__ == "__main__":
